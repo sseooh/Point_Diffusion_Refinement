@@ -20,15 +20,16 @@ def down_sample_points(xyz, npoints):
     
 def mirror_and_concat(partial, axis=2, num_points=[2048, 3072]):
     B, N, _ = partial.size()
-    partial_mirror = mirror(partial, axis=axis)
+    # partial_mirror = mirror(partial, axis=axis)
 
     device = partial.device
     dtype = partial.dtype
     partial = torch.cat([partial, torch.ones(B,N,1, device=device, dtype=dtype)], dim=2) # (B.N,4)
-    partial_mirror = torch.cat([partial_mirror, torch.ones(B,N,1, device=device, dtype=dtype)*(-1)], dim=2) # (B.N,4)
+    # partial_mirror = torch.cat([partial_mirror, torch.ones(B,N,1, device=device, dtype=dtype)*(-1)], dim=2) # (B.N,4)
     
-    concat = torch.cat([partial, partial_mirror], dim=1) # (B,2N,4)
-    concat = concat.cuda()
+    # concat = torch.cat([partial, partial_mirror], dim=1) # (B,2N,4)
+    # concat = concat.cuda()
+    concat = partial.cuda()
     down_sampled = [concat]
     for n in num_points:
         new_xyz = down_sample_points(concat, n)

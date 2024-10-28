@@ -8,13 +8,15 @@ import copy
 import sys
 import warnings
 import pickle
+from collections import defaultdict
 
 
 sys.path.insert(0, os.path.dirname(__file__))
 from mvp_data_utils import augment_cloud
 
 class ShapeNetH5(data.Dataset):
-    def __init__(self, data_dir, train=True, npoints=2048, novel_input=True, novel_input_only=False,
+    # def __init__(self, data_dir, train=True, npoints=2048, novel_input=True, novel_input_only=False,
+    def __init__(self, data_dir, train=True, npoints=2048, novel_input=False, novel_input_only=False,
                         scale=1, rank=0, world_size=1, random_subsample=False, num_samples=1000,
                         augmentation=False, return_augmentation_params=False,
                         include_generated_samples=False, generated_sample_path=None,
@@ -48,13 +50,15 @@ class ShapeNetH5(data.Dataset):
                 self.mirrored_input_path = ('%s/mirror_and_concated_partial/mvp_train_input_mirror_and_concat_%dpts.h5' % 
                                     (data_dir, number_partial_points))
             self.input_path = '%s/mvp_train_input.h5' % data_dir
-            self.gt_path = '%s/mvp_train_gt_%dpts.h5' % (data_dir, npoints)
+            # self.gt_path = '%s/mvp_train_gt_%dpts.h5' % (data_dir, npoints)
+            self.gt_path = '%s/mvp_train_gt_2048pts.h5' % (data_dir)
         else:
             if use_mirrored_partial_input:
                 self.mirrored_input_path = ('%s/mirror_and_concated_partial/mvp_test_input_mirror_and_concat_%dpts.h5' % 
                                     (data_dir, number_partial_points))
             self.input_path = '%s/mvp_test_input.h5' % data_dir
-            self.gt_path = '%s/mvp_test_gt_%dpts.h5' % (data_dir, npoints)
+            # self.gt_path = '%s/mvp_test_gt_%dpts.h5' % (data_dir, npoints)
+            self.gt_path = '%s/mvp_test_gt_2048pts.h5' % (data_dir)
         self.npoints = npoints
         self.train = train # controls the trainset and testset
         # self.benchmark = benchmark
@@ -67,21 +71,28 @@ class ShapeNetH5(data.Dataset):
 
         # load partial point clouds and their labels
         input_file = h5py.File(self.input_path, 'r')
-        self.input_data = np.array((input_file['incomplete_pcds'][()]))
-        self.labels = np.array((input_file['labels'][()]))
+        # self.input_data = np.array((input_file['incomplete_pcds'][()]))
+        # self.labels = np.array((input_file['labels'][()]))
+        self.input_data = np.array(input_file['incomplete_pcds'])
+        self.labels = np.array(input_file['labels'])
+        # print(type(self.input_data))
+        # print(type(self.labels))
         # if benchmark:
         #     self.labels = self.labels[:,0]
         # else:
         #     # benchmark dataset has no novel input
-        self.novel_input_data = np.array((input_file['novel_incomplete_pcds'][()]))
-        self.novel_labels = np.array((input_file['novel_labels'][()]))
+        # self.novel_input_data = np.array((input_file['novel_incomplete_pcds'][()]))
+        # self.novel_labels = np.array((input_file['novel_labels'][()]))
         input_file.close()
 
         # load gt complete point cloud
         # if not benchmark: # benchmark dataset has no gt
         gt_file = h5py.File(self.gt_path, 'r')
-        self.gt_data = np.array((gt_file['complete_pcds'][()]))
-        self.novel_gt_data = np.array((gt_file['novel_complete_pcds'][()]))
+        # self.gt_data = np.array((gt_file['complete_pcds'][()]))
+        self.gt_data = np.array((gt_file['complete_pcds']))
+        self.gt_labels = np.array(gt_file['labels'])
+        # print(type(self.gt_data))
+        # self.novel_gt_data = np.array((gt_file['novel_complete_pcds'][()]))
         gt_file.close()
 
         # load XT generated from a trained DDPM
@@ -129,6 +140,13 @@ class ShapeNetH5(data.Dataset):
             # because we generate one complete point cloud using the trained DDPM for each partial point cloud
             # however, they may have different number of points for each shape
         
+
+        # label을 이용한 pt mapping
+        self.label_to_partial_indices = defaultdict(list)
+        for i, label in enumerate(self.labels):
+            self.label_to_partial_indices[label].append(i)
+
+
         # combine normal input and novel input
         if novel_input_only:
             self.input_data = self.novel_input_data
@@ -143,109 +161,112 @@ class ShapeNetH5(data.Dataset):
             else:
                 self.input_data = np.concatenate((self.input_data, self.novel_input_data), axis=0)
             # if not benchmark:
-            self.gt_data = np.concatenate((self.gt_data, self.novel_gt_data), axis=0)
-            self.labels = np.concatenate((self.labels, self.novel_labels), axis=0)
+            if novel_input and hasattr(self, 'novel_gt_data') and self.novel_gt_data is not None:
+                self.gt_data = np.concatenate((self.gt_data, self.novel_gt_data), axis=0)
+                self.labels = np.concatenate((self.labels, self.novel_labels), axis=0)
 
         # split the whole dataset evenly
         # number of partial point clouds is 26 times of the number of gt complete point clouds
         # we split the gt complete point clouds evenly
         if world_size > 1:
-            # num_gt_shapes = int(np.ceil(self.input_data.shape[0] / 26)) if benchmark else self.gt_data.shape[0]
-            num_gt_shapes = self.gt_data.shape[0]
-            if not num_gt_shapes % world_size == 0:
-                # raise Exception('The dataset (%d samples) can not be distributed evenly on %d gpus' % (self.gt_data.shape[0], world_size))
-                print('The dataset (%d samples) can not be distributed evenly on %d gpus' % (num_gt_shapes, world_size))
+            self.split_dataset_by_labels(rank, world_size, append_samples_to_last_rank)
+            # # num_gt_shapes = int(np.ceil(self.input_data.shape[0] / 26)) if benchmark else self.gt_data.shape[0]
+            # num_gt_shapes = self.gt_data.shape[0]
+            # if not num_gt_shapes % world_size == 0:
+            #     # raise Exception('The dataset (%d samples) can not be distributed evenly on %d gpus' % (self.gt_data.shape[0], world_size))
+            #     print('The dataset (%d samples) can not be distributed evenly on %d gpus' % (num_gt_shapes, world_size))
                 
-            num_shapes_per_world = int(np.ceil(num_gt_shapes / world_size))
-            start = rank * num_shapes_per_world
-            end = (rank+1) * num_shapes_per_world
+            # num_shapes_per_world = int(np.ceil(num_gt_shapes / world_size))
+            # start = rank * num_shapes_per_world
+            # end = (rank+1) * num_shapes_per_world
 
-            if rank == world_size-1 and append_samples_to_last_rank:
-                missing = end * 26 - self.input_data.shape[0]
-                if missing > 0:
-                    # append samples to the last rank so that it has the same number of samples as other ranks
-                    # assert (not benchmark) and (not train) 
-                    assert train
-                    # we should only append samples to the last rank when training 
-                    missing = end - self.gt_data.shape[0]
-                    supp_gt_idx = random.sample(list(range(self.gt_data.shape[0])), missing)
-                    supp_gt_idx = np.array(supp_gt_idx)
-                    supp_partial_idx_start = supp_gt_idx * 26
-                    # pdb.set_trace()
-                    supp_partial_idx_start = supp_partial_idx_start[:, np.newaxis] # (missing, 1)
-                    supp_partial_idx = copy.deepcopy(supp_partial_idx_start)
-                    for i in range(26):
-                        supp_partial_idx = np.concatenate([supp_partial_idx, supp_partial_idx_start+i], axis=1)
-                    supp_partial_idx = supp_partial_idx[:,1:]
-                    supp_partial_idx = np.reshape(supp_partial_idx, (-1))
+            # if rank == world_size-1 and append_samples_to_last_rank:
+            #     missing = end * 26 - self.input_data.shape[0]
+            #     if missing > 0:
+            #         # append samples to the last rank so that it has the same number of samples as other ranks
+            #         # assert (not benchmark) and (not train) 
+            #         assert train
+            #         # we should only append samples to the last rank when training 
+            #         missing = end - self.gt_data.shape[0]
+            #         supp_gt_idx = random.sample(list(range(self.gt_data.shape[0])), missing)
+            #         supp_gt_idx = np.array(supp_gt_idx)
+            #         supp_partial_idx_start = supp_gt_idx * 26
+            #         # pdb.set_trace()
+            #         supp_partial_idx_start = supp_partial_idx_start[:, np.newaxis] # (missing, 1)
+            #         supp_partial_idx = copy.deepcopy(supp_partial_idx_start)
+            #         for i in range(26):
+            #             supp_partial_idx = np.concatenate([supp_partial_idx, supp_partial_idx_start+i], axis=1)
+            #         supp_partial_idx = supp_partial_idx[:,1:]
+            #         supp_partial_idx = np.reshape(supp_partial_idx, (-1))
 
-                    supp_partial = self.input_data[supp_partial_idx]
-                    supp_label = self.labels[supp_partial_idx]
-                    # if not benchmark:
-                    supp_gt = self.gt_data[supp_gt_idx]
-                    if self.include_generated_samples:
-                        supp_generated = self.generated_sample[supp_partial_idx]
-                    if self.load_pre_computed_XT:
-                        supp_generated_XT = self.generated_XT[supp_partial_idx]
+            #         supp_partial = self.input_data[supp_partial_idx]
+            #         supp_label = self.labels[supp_partial_idx]
+            #         # if not benchmark:
+            #         supp_gt = self.gt_data[supp_gt_idx]
+            #         if self.include_generated_samples:
+            #             supp_generated = self.generated_sample[supp_partial_idx]
+            #         if self.load_pre_computed_XT:
+            #             supp_generated_XT = self.generated_XT[supp_partial_idx]
             
-            self.input_data = self.input_data[start*26:end*26]
-            # if not benchmark:
-            self.gt_data = self.gt_data[start:end]
-            self.labels = self.labels[start*26:end*26]
-            if self.include_generated_samples:
-                self.generated_sample = self.generated_sample[start*26:end*26]
-            if self.load_pre_computed_XT:
-                self.generated_XT = self.generated_XT[start*26:end*26]
+            # self.input_data = self.input_data[start*26:end*26]
+            # # if not benchmark:
+            # self.gt_data = self.gt_data[start:end]
+            # self.labels = self.labels[start*26:end*26]
+            # if self.include_generated_samples:
+            #     self.generated_sample = self.generated_sample[start*26:end*26]
+            # if self.load_pre_computed_XT:
+            #     self.generated_XT = self.generated_XT[start*26:end*26]
 
-            if rank == world_size-1 and append_samples_to_last_rank:
-                if missing>0:
-                    self.input_data = np.concatenate([self.input_data, supp_partial], axis=0)
-                    self.labels = np.concatenate([self.labels, supp_label], axis=0)
-                    # if not benchmark:
-                    self.gt_data = np.concatenate([self.gt_data, supp_gt], axis=0)
-                    if self.include_generated_samples:
-                        self.generated_sample = np.concatenate([self.generated_sample, supp_generated], axis=0)
-                    if self.load_pre_computed_XT:
-                        self.generated_XT = np.concatenate([self.generated_XT, supp_generated_XT], axis=0)
-                    print('%d samples are appended to the the last rank' % missing)
+            # if rank == world_size-1 and append_samples_to_last_rank:
+            #     if missing>0:
+            #         self.input_data = np.concatenate([self.input_data, supp_partial], axis=0)
+            #         self.labels = np.concatenate([self.labels, supp_label], axis=0)
+            #         # if not benchmark:
+            #         self.gt_data = np.concatenate([self.gt_data, supp_gt], axis=0)
+            #         if self.include_generated_samples:
+            #             self.generated_sample = np.concatenate([self.generated_sample, supp_generated], axis=0)
+            #         if self.load_pre_computed_XT:
+            #             self.generated_XT = np.concatenate([self.generated_XT, supp_generated_XT], axis=0)
+            #         print('%d samples are appended to the the last rank' % missing)
         
         # randomly subsample the datasets, because we may want to only test the trained DDPM on a fraction of the 
         # dataset to save time 
         self.random_subsample = random_subsample
         if random_subsample:
-            if num_samples < self.input_data.shape[0]:
-                partial_to_complete_index = np.arange(self.gt_data.shape[0])
-                partial_to_complete_index = np.repeat(partial_to_complete_index[:,np.newaxis], 26, axis=1)
-                partial_to_complete_index = partial_to_complete_index.reshape((self.gt_data.shape[0]*26))
+            self.random_subsample_by_labels(num_samples)
+            # if num_samples < self.input_data.shape[0]:
+            #     partial_to_complete_index = np.arange(self.gt_data.shape[0])
+            #     partial_to_complete_index = np.repeat(partial_to_complete_index[:,np.newaxis], 26, axis=1)
+            #     partial_to_complete_index = partial_to_complete_index.reshape((self.gt_data.shape[0]*26))
 
-                # if use_a_random_indices_file:
-                #     idx_handle = open(random_indices_file, 'rb')
-                #     idx_data = pickle.load(idx_handle)
-                #     idx = idx_data['idx']
-                #     idx_handle.close()
-                #     if world_size>1:
-                #         assert not append_samples_to_last_rank
-                #         num_partial_shapes_per_world = num_shapes_per_world * 26
-                #         idx = idx - rank * num_shapes_per_world
-                #         this_rank_samples = (idx < num_partial_shapes_per_world) * (idx >= 0)
-                #         idx = idx[this_rank_samples]
-                #     num_samples = idx.shape[0]
-                # else:
+            #     # if use_a_random_indices_file:
+            #     #     idx_handle = open(random_indices_file, 'rb')
+            #     #     idx_data = pickle.load(idx_handle)
+            #     #     idx = idx_data['idx']
+            #     #     idx_handle.close()
+            #     #     if world_size>1:
+            #     #         assert not append_samples_to_last_rank
+            #     #         num_partial_shapes_per_world = num_shapes_per_world * 26
+            #     #         idx = idx - rank * num_shapes_per_world
+            #     #         this_rank_samples = (idx < num_partial_shapes_per_world) * (idx >= 0)
+            #     #         idx = idx[this_rank_samples]
+            #     #     num_samples = idx.shape[0]
+            #     # else:
 
-                index = list(range(self.input_data.shape[0]))
-                idx = random.sample(index, num_samples)
-                idx = np.array(idx) 
-                self.input_data = self.input_data[idx]
-                self.labels = self.labels[idx]
-                self.partial_to_complete_index = partial_to_complete_index[idx]
-                if self.include_generated_samples:
-                    self.generated_sample = self.generated_sample[idx]
-                if self.load_pre_computed_XT:
-                    self.generated_XT = self.generated_XT[idx]
-            else:
-                self.random_subsample = False
-                warnings.warn("The provided num_samples (%d) is not less than the number of shapes (%d). random_subsample will not be performed"
-                                % (num_samples, self.input_data.shape[0]))
+            #     index = list(range(self.input_data.shape[0]))
+            #     idx = random.sample(index, num_samples)
+            #     idx = np.array(idx) 
+            #     self.input_data = self.input_data[idx]
+            #     self.labels = self.labels[idx]
+            #     self.partial_to_complete_index = partial_to_complete_index[idx]
+            #     if self.include_generated_samples:
+            #         self.generated_sample = self.generated_sample[idx]
+            #     if self.load_pre_computed_XT:
+            #         self.generated_XT = self.generated_XT[idx]
+            # else:
+            #     self.random_subsample = False
+            #     warnings.warn("The provided num_samples (%d) is not less than the number of shapes (%d). random_subsample will not be performed"
+            #                     % (num_samples, self.input_data.shape[0]))
 
         self.scale = scale
         # shapes in mvp dataset range from -0.5 to 0.5
@@ -274,6 +295,36 @@ class ShapeNetH5(data.Dataset):
         self.labels = self.labels.astype(int)
         self.len = self.input_data.shape[0]
 
+    def split_dataset_by_labels(self, rank, world_size, append_samples_to_last_rank):
+        partial_indices_per_rank = [[] for _ in range(world_size)]
+        for label, partial_indices in self.label_to_partial_indices.items():
+            chunk_size = int(np.ceil(len(partial_indices) / world_size))
+            for i in range(world_size):
+                start_idx = i * chunk_size
+                end_idx = min((i + 1) * chunk_size, len(partial_indices))
+                partial_indices_per_rank[i].extend(partial_indices[start_idx:end_idx])
+
+        selected_indices = partial_indices_per_rank[rank]
+        self.input_data = self.input_data[selected_indices]
+        self.labels = self.labels[selected_indices]
+
+        if rank == world_size - 1 and append_samples_to_last_rank:
+            total_size = len(self.input_data)
+            expected_size = len(partial_indices_per_rank[0])
+            if total_size < expected_size:
+                extra_indices = random.choices(selected_indices, k=expected_size - total_size)
+                self.input_data = np.concatenate([self.input_data, self.input_data[extra_indices]], axis=0)
+                self.labels = np.concatenate([self.labels, self.labels[extra_indices]], axis=0)
+
+    def random_subsample_by_labels(self, num_samples):
+        sampled_indices = []
+        for label, partial_indices in self.label_to_partial_indices.items():
+            sample_size = min(num_samples, len(partial_indices))
+            sampled_indices.extend(random.sample(partial_indices, sample_size))
+
+        self.input_data = self.input_data[sampled_indices]
+        self.labels = self.labels[sampled_indices]
+
     def __len__(self):
         return self.len
 
@@ -282,12 +333,19 @@ class ShapeNetH5(data.Dataset):
         # it will change the original data if we do not deep copy
         result = {}
         result['partial'] = copy.deepcopy(self.input_data[index])
-        # if not self.benchmark:
-        if self.random_subsample:
-            gt_idx = self.partial_to_complete_index[index]
-        else:
-            gt_idx = index // 26
+
+        label = self.labels[index]
+
+        gt_idx = np.where(self.gt_labels == label)[0][0]
+
         result['complete'] = copy.deepcopy(self.gt_data[gt_idx])
+
+        # # if not self.benchmark:
+        # if self.random_subsample:
+        #     gt_idx = self.partial_to_complete_index[index]
+        # else:
+        #     gt_idx = index // 26
+        # result['complete'] = copy.deepcopy(self.gt_data[gt_idx])
         
         if self.include_generated_samples:
             result['generated'] = copy.deepcopy(self.generated_sample[index])
@@ -318,7 +376,8 @@ class ShapeNetH5(data.Dataset):
                 result[key] = augmentation_params[key]
         for key in result.keys():
             result[key] = torch.from_numpy(result[key])
-        result['label'] = self.labels[index]
+        # result['label'] = self.labels[index]
+        result['label'] = label
         # if self.benchmark:
         #     result['complete'] = 0
 

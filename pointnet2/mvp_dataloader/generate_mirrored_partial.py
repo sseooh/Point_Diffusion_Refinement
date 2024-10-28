@@ -21,16 +21,24 @@ if __name__ == '__main__':
     # aug_args = {'pc_augm_scale':0, 'pc_augm_rot':False, 'pc_rot_scale':30.0, 'pc_augm_mirror_prob':0.5, 'pc_augm_jitter':False}
     # include_generated_samples=True 
     train = False
-    benchmark = True
+    # train = True
+    # benchmark = True
+    benchmark = False
     data_dir = './data/mvp_dataset'
     mirror_save_dir = 'mirror_and_concated_partial'
     os.makedirs(os.path.join(data_dir, mirror_save_dir), exist_ok=True)
     # generated_sample_path='generated_samples/T1000_betaT0.02_shape_completion_no_class_condition_scale_1_no_random_replace_partail_with_complete/ckpt_1403999'
     generated_sample_path = None
-    dataset = ShapeNetH5(data_dir, train=train, benchmark = benchmark, npoints=2048, novel_input=True, novel_input_only=False,
-                            random_replace_partial_with_complete_prob=0, augmentation=False, scale=0.5,
-                            random_subsample=False, num_samples=100000,
-                            include_generated_samples=False, generated_sample_path=generated_sample_path)
+    # dataset = ShapeNetH5(data_dir, train=train, benchmark = benchmark, npoints=2048, novel_input=True, novel_input_only=False,
+    #                         random_replace_partial_with_complete_prob=0, augmentation=False, scale=0.5,
+    #                         random_subsample=False, num_samples=100000,
+    #                         include_generated_samples=False, generated_sample_path=generated_sample_path)
+
+    # dataset = ShapeNetH5(data_dir, train=train, npoints=2048, novel_input=True, novel_input_only=False,
+    dataset = ShapeNetH5(data_dir, train=train, npoints=2048, novel_input=False, novel_input_only=False,
+                        augmentation=False, scale=0.5,
+                        random_subsample=False, num_samples=100000,
+                        include_generated_samples=False, generated_sample_path=generated_sample_path)
     
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=128, shuffle=False, num_workers=4)
     mirror_concat = None
@@ -38,7 +46,11 @@ if __name__ == '__main__':
     with torch.no_grad():
         for i, data in enumerate(dataloader):
             # label, partial, complete = data
-            label, partial, complete = data
+            # label, partial, complete = data
+            label = data['label']
+            partial = data['partial']
+            complete = data['complete']
+            print(type(label), type(partial), type(complete))
             print('index %d label %s partail shape %s [%.3f, %.3f] complete shape %s [%.3f, %.3f]' % (
                 i, label.shape, partial.shape, partial.min(), partial.max(), complete.shape, complete.min(), complete.max(),))
             concat = mirror_and_concat(partial, axis=2, num_points=[2048, 3072])

@@ -350,6 +350,12 @@ class PointNet2CloudCondition(PointNet2SemSegSSG):
             t_emb = None
 
         if (not label is None) and self.hparams['include_class_condition']:
+            # 오류 디버깅을 위한 출력문 추가
+            # print("Label values:", label)
+            # print("Label shape:", label.shape)
+            # print("Number of classes in class_emb:", self.class_emb.num_embeddings)
+            assert (label >= 0).all() and (label < self.class_emb.num_embeddings).all(), "Label values out of range!"
+        
             # label should be 1D tensor of integers of shape (B)
             class_emb = self.class_emb(label) # shape (B, condition_emb_dim)
         else:

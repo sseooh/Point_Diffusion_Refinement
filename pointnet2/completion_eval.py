@@ -12,7 +12,7 @@ from util import rescale, find_max_epoch, print_size, sampling, calc_diffusion_h
 from util_fastdpmv2 import fast_sampling_function_v2
 
 torch_version = torch.__version__
-if torch_version == '1.7.1':
+if torch_version == '1.7.1' or torch_version == '2.4.1+cu118':
     from models.pointnet2_ssg_sem import PointNet2SemSegSSG
     from models.pointnet2_with_pcld_condition import PointNet2CloudCondition
     from models.point_upsample_module import point_upsample
@@ -105,14 +105,14 @@ def evaluate(net, testloader, diffusion_hyperparams, print_every_n_steps=200, pa
 
     # cd_module = Chamfer_Loss()
     f1_threshold = 0.001 if dataset == 'mvp40' else 0.0001
-    if torch_version == '1.7.1':
+    if torch_version == '1.7.1' or torch_version == '2.4.1+cu118':
         cd_module = Chamfer_F1(f1_threshold=f1_threshold)
         if compute_emd and EMD_module_loaded:
             emd_module = EMD_distance()
 
     if parallel:
         net = MyDataParallel(net)
-        if torch_version == '1.7.1':
+        if torch_version == '1.7.1' or torch_version == '2.4.1+cu118':
             cd_module = nn.DataParallel(cd_module)
             if compute_emd and EMD_module_loaded:
                 emd_module = nn.DataParallel(emd_module)
@@ -214,7 +214,7 @@ def evaluate(net, testloader, diffusion_hyperparams, print_every_n_steps=200, pa
                 
         torch.cuda.empty_cache()
         
-        if torch_version == '1.7.1':
+        if torch_version == '1.7.1' or torch_version == '2.4.1+cu118':
             if compute_cd:
                 cd_p, dist, f1 = cd_module(generated_data, gt)
                 cd_loss = dist.mean().detach().cpu().item()

@@ -49,7 +49,7 @@
             "include_grouper": false,
             "decoder_mlp_depth": 2,
             "use_knn_FP": true,
-            "K": 8
+            "K": 1
         },
         "condition_net_architecture": {
             "npoint": "[1024, 256, 64, 16]",
@@ -62,7 +62,7 @@
             "include_grouper": false,
             "decoder_mlp_depth": 2,
             "use_knn_FP": true,
-            "K": 8
+            "K": 1
         },
         "feature_mapper_architecture": {
             "neighbor_definition": "radius",
@@ -83,11 +83,11 @@
         "output_directory": "logs/checkpoint",
         "tensorboard_directory": "logs/tensorboard",
         "ckpt_iter": "max",
-        "epochs_per_ckpt": 100,
+        "epochs_per_ckpt": 1,
         "iters_per_logging": 50,
-        "n_epochs": 300,
+        "n_epochs": 1,
         "eval_start_epoch": 0,
-        "eval_per_ckpt": 3,
+        "eval_per_ckpt": 1,
         "learning_rate": 0.0002,
         "loss_type": "mse",
         "conditioned_on_cloud": true,

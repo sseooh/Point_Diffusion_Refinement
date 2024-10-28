@@ -57,7 +57,7 @@ def evaluate(testloader, dataset='mvp_dataset', compute_emd=True, scale=0.5, par
 if __name__ == "__main__":
     scale = 0.5
     parallel = True
-    os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2,3,4,5,6,7'
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
     batch_size = 256
     compute_emd = True
 

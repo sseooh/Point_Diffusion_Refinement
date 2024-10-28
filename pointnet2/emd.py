@@ -75,7 +75,7 @@ if __name__ == '__main__':
     import pdb
     # from pytorch3d.loss.chamfer import chamfer_distance
     import os
-    os.environ['CUDA_VISIBLE_DEVICES'] = '1,2'
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
     n = 2048
     m = 2048
     return_match = False

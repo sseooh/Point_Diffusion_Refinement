@@ -37,6 +37,10 @@ def _handle_pointcloud_input(
     Otherwise, return the input points (and normals) with the number of points per cloud
     set to the size of the second dimension of `points`.
     """
+
+    # print(f"points shape: {points.shape if isinstance(points, torch.Tensor) else 'Pointclouds'}")
+    # print(f"lengths: {lengths}, normals: {normals}")
+
     if isinstance(points, Pointclouds):
         X = points.points_padded()
         lengths = points.num_points_per_cloud()
@@ -107,6 +111,12 @@ def chamfer_distance(
           between pointclouds in x and pointclouds in y. Returns None if
           x_normals and y_normals are None.
     """
+
+    # print(f"x shape: {x.shape}, y shape: {y.shape}")
+    # print(f"x_lengths: {x_lengths}, y_lengths: {y_lengths}")
+    # print(f"batch_reduction: {batch_reduction}, point_reduction: {point_reduction}")
+
+
     _validate_chamfer_reduction_inputs(batch_reduction, point_reduction)
 
     x, x_lengths, x_normals = _handle_pointcloud_input(x, x_lengths, x_normals)
@@ -149,8 +159,15 @@ def chamfer_distance(
     x_nn = knn_points(x, y, lengths1=x_lengths, lengths2=y_lengths, K=1)
     y_nn = knn_points(y, x, lengths1=y_lengths, lengths2=x_lengths, K=1)
 
+    # print(f"x shape: {x.shape}, y shape: {y.shape}")
+    # print(f"x lengths: {x_lengths}, y lengths: {y_lengths}")
+    # print(f"x_nn: {x_nn}, y_nn: {y_nn}")
+
     cham_x = x_nn.dists[..., 0]  # (N, P1)
     cham_y = y_nn.dists[..., 0]  # (N, P2)
+
+    # print(f"GPU memory allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
+    # print(f"GPU memory reserved: {torch.cuda.memory_reserved() / 1024**3:.2f} GB")
 
     if is_x_heterogeneous:
         cham_x[x_mask] = 0.0
